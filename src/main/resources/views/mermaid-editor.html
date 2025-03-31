@@ -12,7 +12,39 @@
         }
         h1, h2 { text-align: center; }
 
-        /* Cytoscape graph container */
+        /* Pipeline Config Selector */
+        .pipeline-config-selector {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px auto;
+            max-width: 800px;
+            background-color: #f9f9f9;
+        }
+        .pipeline-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        .pipeline-links a {
+            display: inline-block;
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            border-radius: 20px;
+            text-decoration: none;
+            color: #333;
+            font-size: 14px;
+        }
+        .pipeline-links a.active {
+            background-color: #4CAF50;
+            color: #fff;
+            border-color: #4CAF50;
+        }
+        .pipeline-links a:hover {
+            background-color: #ddd;
+        }
+
+        /* Cytoscape container */
         #cytoscape {
             width: 100%;
             height: 70vh;
@@ -20,10 +52,12 @@
             box-sizing: border-box;
         }
 
-        /* "New Service" button */
-        .new-service-btn {
-            display: block;
-            margin: 1rem auto;
+        /* Button styles */
+        .button-container {
+            text-align: center;
+            margin: 1rem 0;
+        }
+        .new-service-btn, .copy-mermaid-btn {
             padding: 10px 20px;
             font-size: 16px;
             background-color: #4CAF50;
@@ -31,8 +65,9 @@
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            margin: 0 5px;
         }
-        .new-service-btn:hover {
+        .new-service-btn:hover, .copy-mermaid-btn:hover {
             background-color: #45a049;
         }
 
@@ -87,7 +122,7 @@
         }
     </style>
 
-    <!-- Include Cytoscape, panzoom, and Mermaid libraries -->
+    <!-- Cytoscape, panzoom, and Mermaid libraries -->
     <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-panzoom/cytoscape-panzoom.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
@@ -96,11 +131,16 @@
         /*
            The controller supplies:
              - pipelineConfig: active pipeline’s service map.
-             - pipelineNames, activePipeline, and pipelines (allPipelines) are no longer needed on the FE.
+             - pipelineNames: a set/array of pipeline configuration names.
+             - activePipeline: name of the active pipeline.
+             - pipelines: a map of pipeline name to full service map.
         */
         let pipelineConfig = [[${pipelineConfig}]];
+        let pipelineNames = [[${pipelineNames}]];
+        let activePipeline = '[[${activePipeline}]]';
+        let allPipelines = [[${pipelines}]];
 
-        // Helper: generate unique node IDs.
+        // Helper: generate a unique node ID.
         const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
 
         // Generate Mermaid DSL from the active pipeline configuration.
@@ -109,7 +149,6 @@
             let grpcNodes = new Set();
             let kafkaNodes = new Set();
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
-                // Ignore empty or "null" service names.
                 if (!service || service.trim() === "" || service.trim().toLowerCase() === "null") continue;
                 const grpcNode = nodeId('grpc', service);
                 if (!grpcNodes.has(grpcNode)) {
@@ -157,9 +196,8 @@
             });
         }
 
-        // Open the modal for editing/adding a service.
+        // Open the modal for editing or adding a service.
         function openServiceModal(serviceName) {
-            // Ignore if serviceName is empty or "null".
             if (serviceName && (serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null")) return;
             const modal = document.getElementById('service-modal');
             if (serviceName) {
@@ -189,7 +227,7 @@
             }
         });
 
-        // When a node or an existing service is clicked, open the modal.
+        // When a node is clicked, open the modal.
         function selectService(serviceName) {
             if (!serviceName || serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null") return;
             openServiceModal(serviceName);
@@ -200,7 +238,6 @@
         function renderCytoscape() {
             const elements = [];
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
-                // Skip empty or "null" service names.
                 if (!service || service.trim() === "" || service.trim().toLowerCase() === "null") continue;
                 const grpcNode = nodeId('grpc', service);
                 elements.push({ data: { id: grpcNode, label: service, type: 'grpc', original: service } });
@@ -289,7 +326,6 @@
                 }
             });
 
-            // Enable pan/zoom if available.
             if (typeof cytoscapePanzoom !== 'undefined') {
                 cytoscape.use(cytoscapePanzoom);
                 cy.panzoom();
@@ -297,13 +333,12 @@
 
             // Change node color on mouseover and revert on mouseout.
             cy.on('mouseover', 'node[type="grpc"]', function(evt) {
-                evt.target.css('background-color', '#6495ED'); // darker blue
+                evt.target.css('background-color', '#6495ED');
             });
             cy.on('mouseout', 'node[type="grpc"]', function(evt) {
                 evt.target.css('background-color', '#ADD8E6');
             });
 
-            // On tap, load the service data using the stored original name.
             cy.on('tap', 'node[type="grpc"]', function(evt) {
                 let node = evt.target;
                 let serviceName = node.data('original');
@@ -315,12 +350,11 @@
             cy.fit();
         }
 
-        // Delete service configuration: send delete request to backend.
         async function deleteModalService() {
             const serviceName = document.getElementById('modal-service-name').value;
             if (!serviceName || serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null") return;
             await fetch('/pipeline/delete', {
-                method: 'POST', // or DELETE if supported
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: serviceName })
             });
@@ -330,7 +364,6 @@
             closeServiceModal();
         }
 
-        // Save service configuration from the modal and re-render.
         async function saveModalService() {
             const serviceName = document.getElementById('modal-service-name').value;
             if (!serviceName || serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null") {
@@ -361,11 +394,29 @@
 </head>
 <body>
 <h1>Pipeline Visual Editor</h1>
+
+<!-- Pipeline Configuration Selector -->
+<div class="pipeline-config-selector" th:if="${pipelineNames != null}">
+    <div class="pipeline-links">
+        <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; justify-content: center;">
+            <li th:each="name : ${pipelineNames}" style="margin: 5px;">
+                <a href="#" th:href="@{'/?pipeline=' + ${name}}"
+                   th:text="${name}"
+                   th:classappend="${name.equals(activePipeline)} ? ' active' : ''">
+                </a>
+            </li>
+        </ul>
+    </div>
+</div>
+
 <!-- Cytoscape graph container -->
 <div id="cytoscape"></div>
 
-<!-- "New Service" button -->
-<button class="new-service-btn" onclick="openServiceModal()">New Service</button>
+<!-- Button container for New Service and Copy Mermaid -->
+<div class="button-container">
+    <button class="new-service-btn" onclick="openServiceModal()">New Service</button>
+    <button class="copy-mermaid-btn" onclick="copyMermaidToClipboard()" title="Copy Mermaid to clipboard">Copy Mermaid</button>
+</div>
 
 <!-- Modal for editing/adding a service -->
 <div id="service-modal" class="modal-overlay">
