@@ -4,19 +4,20 @@
     <meta charset="UTF-8">
     <title>Pipeline Visual Editor</title>
     <style>
-        /* (Inline CSS similar to previous version) */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
         }
         h1, h2, h3 { text-align: center; }
+        /* Cytoscape container takes up full width and 70% of viewport height */
         #cytoscape {
             width: 100%;
             height: 70vh;
             border: 1px solid #ccc;
             box-sizing: border-box;
         }
+        /* Flex container for editor form and pipeline list */
         .editor-container {
             display: flex;
             justify-content: center;
@@ -29,9 +30,10 @@
             max-width: 400px;
         }
         .existing-pipelines {
-            flex: 0 0 200px;
-            align-self: center;
+            flex: 0 0 300px;
+            align-self: flex-start;
         }
+        /* Tighter form rows: label and input on the same line */
         .form-row {
             display: flex;
             align-items: center;
@@ -56,37 +58,59 @@
             padding: 8px 16px;
             font-size: 14px;
         }
-        ul {
+        /* Pipeline list styles */
+        .pipeline-list {
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+        .pipeline-list h3 {
+            margin-top: 0;
+        }
+        .pipeline-list ul {
             list-style: none;
-            text-align: center;
             padding: 0;
         }
-        li {
-            margin: 0.5rem 0;
+        .pipeline-list li {
+            margin-bottom: 10px;
         }
-        a {
+        .pipeline-list a {
             cursor: pointer;
             color: #1a73e8;
             text-decoration: none;
         }
-        a:hover { text-decoration: underline; }
+        .pipeline-list a:hover {
+            text-decoration: underline;
+        }
+        .services-list {
+            margin-left: 10px;
+            font-size: 90%;
+            color: #555;
+        }
     </style>
 
-    <!-- Include Cytoscape, panzoom, Mermaid as before -->
+    <!-- Include Cytoscape, panzoom, and Mermaid -->
     <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-panzoom/cytoscape-panzoom.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 
     <script th:inline="javascript">
-        // Inject the active pipeline configuration and the pipeline names.
+        /*
+           The controller now supplies:
+             - pipelineConfig: the active pipeline’s service map.
+             - pipelineNames: a set of pipeline names.
+             - activePipeline: the name of the active pipeline.
+             - pipelines: a map from pipeline name to its full service map.
+        */
         let pipelineConfig = [[${pipelineConfig}]];
         let pipelineNames = [[${pipelineNames}]];
         let activePipeline = '[[${activePipeline}]]';
+        let allPipelines = [[${pipelines}]];
 
+        // Helper function: generate a unique node ID by replacing non-word characters.
         const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
 
+        // Generate Mermaid DSL from the active pipeline configuration.
         function generateMermaidDSL() {
-            // (Same function as before, using pipelineConfig)
             let graph = 'graph TD\n';
             let grpcNodes = new Set();
             let kafkaNodes = new Set();
@@ -136,6 +160,7 @@
             });
         }
 
+        // Global function: load service data from active pipeline config into the form.
         function selectService(serviceName) {
             const cfg = pipelineConfig[serviceName];
             if (!cfg) return;
@@ -146,6 +171,7 @@
         }
         window.selectService = selectService;
 
+        // Render the Cytoscape graph for the active pipeline.
         function renderCytoscape() {
             const elements = [];
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
@@ -256,22 +282,20 @@
         function renderExistingPipelines() {
             const listContainer = document.querySelector('.existing-pipelines ul');
             let html = '';
-            pipelineNames.forEach(name => {
-                // Mark the active pipeline as selected
+            Object.values(pipelineNames).forEach(name => {
                 const selected = (name === activePipeline) ? ' (active)' : '';
                 html += `<li><a href="#" data-pipeline="${name}" onclick="selectPipeline(this.getAttribute('data-pipeline')); return false;">${name}${selected}</a></li>`;
             });
             listContainer.innerHTML = html;
         }
 
-        // Called when the user selects a different pipeline from the dropdown or list.
+        // Called when the user selects a different pipeline.
         function selectPipeline(pipelineName) {
-            // For this iteration, you might send a request to update the active pipeline in the backend,
-            // or simply reload the page with a query parameter. For simplicity, we'll use location.href.
+            // For now, simply reload the page with the selected pipeline.
             window.location.href = '/?pipeline=' + pipelineName;
         }
 
-        // Save updated service configuration and re-render the graph and existing services.
+        // Save the updated service configuration and re-render the graph and pipeline list.
         async function saveService() {
             const payload = {
                 name: document.getElementById('service-name').value,
@@ -303,7 +327,7 @@
 <!-- Cytoscape graph container -->
 <div id="cytoscape"></div>
 
-<!-- Editor container: service editor form and existing pipelines list side by side -->
+<!-- Editor container: service editor form and pipeline list side by side -->
 <div class="editor-container">
     <div class="editor-form">
         <h2>Service Editor</h2>
@@ -333,7 +357,7 @@
     <div class="existing-pipelines">
         <h3>Pipeline Configurations</h3>
         <ul>
-            <!-- Existing pipelines will be rendered here dynamically -->
+            <!-- This list will be rendered dynamically with pipeline names and their services -->
         </ul>
     </div>
 </div>

@@ -10,6 +10,7 @@ import io.micronaut.http.annotation.Body;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Get;
 import io.micronaut.http.annotation.Post;
+import io.micronaut.http.annotation.QueryValue;
 import io.micronaut.views.View;
 import jakarta.inject.Inject;
 
@@ -27,12 +28,17 @@ public class MermaidController {
 
     @View("mermaid-editor")
     @Get("/")
-    public Map<String, Object> index() {
+    public Map<String, Object> index(@QueryValue(defaultValue = "") String pipeline) {
+        // If a pipeline query parameter is provided, update the active pipeline.
+        if (!pipeline.isEmpty()) {
+            configService.setActivePipelineName(pipeline);
+        }
         PipelineConfig activeConfig = configService.getActivePipelineConfig();
         return Map.of(
                 "pipelineConfig", activeConfig.getService(),
                 "pipelineNames", configService.getAllPipelineNames(),
-                "activePipeline", configService.getActivePipelineConfig().getName()
+                "activePipeline", activeConfig.getName(),
+                "pipelines", configService.getAllPipelineConfigs()
         );
     }
 
@@ -43,7 +49,7 @@ public class MermaidController {
 
     @Post(value = "/pipeline/add", consumes = MediaType.APPLICATION_JSON)
     public HttpStatus addService(@Body ServiceConfigurationDto dto) {
-        // Validate: if any forward-to service isn't present, add it as its own pipeline service.
+        // Validate: if any forward-to service isn't present in the active pipeline, add it.
         for (String grpcForward : dto.getGrpcForwardTo()) {
             if (!configService.getActivePipelineConfig().containsService(grpcForward)) {
                 ServiceConfigurationDto newDto = new ServiceConfigurationDto();
