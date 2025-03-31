@@ -1,32 +1,73 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<html xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <title>Pipeline Visual Editor</title>
     <style>
-        /* Inline CSS as a temporary workaround */
         body {
             font-family: Arial, sans-serif;
-            padding: 2rem;
-            max-width: 800px;
-            margin: auto;
-            background-color: #f7f9fc;
+            margin: 0;
+            padding: 0;
         }
-        input {
+        h1, h2, h3 { text-align: center; }
+        /* Cytoscape container takes up full width and 70% of viewport height */
+        #cytoscape {
             width: 100%;
-            padding: 5px;
-            margin-bottom: 10px;
+            height: 70vh;
+            border: 1px solid #ccc;
             box-sizing: border-box;
         }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            cursor: pointer;
+        /* Flex container for editor form and existing services */
+        .editor-container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 2rem;
+            padding: 1rem;
         }
-        button:hover {
-            background-color: #45a049;
+        /* Editor form on left */
+        .editor-form {
+            flex: 1;
+            max-width: 400px;
+        }
+        /* Existing services list on right */
+        .existing-services {
+            flex: 0 0 200px;
+            align-self: center;
+        }
+        /* Form rows: label and input in one row */
+        .form-row {
+            display: flex;
+            align-items: center;
+            margin: 0.5rem 0;
+        }
+        .form-row label {
+            width: 150px;
+            margin-right: 0.5rem;
+            text-align: right;
+            font-weight: normal;
+        }
+        .form-row input {
+            flex: 1;
+            padding: 5px;
+            font-size: 14px;
+        }
+        /* Buttons row */
+        .form-row.buttons {
+            justify-content: center;
+        }
+        .form-row.buttons button {
+            margin: 0 0.5rem;
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        ul {
+            list-style: none;
+            text-align: center;
+            padding: 0;
+        }
+        li {
+            margin: 0.5rem 0;
         }
         a {
             cursor: pointer;
@@ -37,125 +78,213 @@
             text-decoration: underline;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <script th:inline="javascript">
-        mermaid.initialize({ startOnLoad: false });
 
-        // Inject the pipeline configuration JSON from the controller.
+    <!-- Cytoscape core library -->
+    <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+    <!-- Cytoscape panzoom extension -->
+    <script src="https://unpkg.com/cytoscape-panzoom/cytoscape-panzoom.js"></script>
+    <!-- Mermaid for generating DSL (not displayed) -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+
+    <script th:inline="javascript">
+        // Inject pipeline configuration JSON from the controller.
         let pipelineConfig = [[${pipelineConfig}]];
 
-        async function renderMermaid() {
+        // Helper: generate a unique node ID by replacing non-word characters.
+        const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
+
+        // Generate Mermaid DSL from pipelineConfig.
+        function generateMermaidDSL() {
             let graph = 'graph TD\n';
             let grpcNodes = new Set();
             let kafkaNodes = new Set();
-            const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
-
-            // Build nodes and edges from the configuration.
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
                 const grpcNode = nodeId('grpc', service);
                 if (!grpcNodes.has(grpcNode)) {
-                    // Render the grpc node and add a Mermaid click directive.
                     graph += `${grpcNode}([${service}])\n`;
-                    graph += `click ${grpcNode} selectService "Edit ${service}"\n`;
                     grpcNodes.add(grpcNode);
                 }
-                // Kafka listen topics: edge from kafka node to grpc node.
                 (cfg.kafkaListenTopics || []).forEach(topic => {
                     const kafkaNode = nodeId('kafka', topic);
                     kafkaNodes.add(kafkaNode);
                     graph += `${kafkaNode}[${topic}]\n`;
                     graph += `${kafkaNode} --> ${grpcNode}\n`;
                 });
-                // Kafka publish topics: edge from grpc node to kafka node.
                 (cfg.kafkaPublishTopics || []).forEach(topic => {
                     const kafkaNode = nodeId('kafka', topic);
                     kafkaNodes.add(kafkaNode);
                     graph += `${grpcNode} --> ${kafkaNode}\n`;
                 });
-                // gRPC forward targets: edge from grpc node to target grpc node.
                 (cfg.grpcForwardTo || []).forEach(target => {
                     if (target && target.toLowerCase() !== 'null') {
                         const targetNode = nodeId('grpc', target);
                         if (!grpcNodes.has(targetNode)) {
                             graph += `${targetNode}([${target}])\n`;
-                            graph += `click ${targetNode} selectService "Edit ${target}"\n`;
                             grpcNodes.add(targetNode);
                         }
                         graph += `${grpcNode} --> ${targetNode}\n`;
                     }
                 });
             }
-
-            // Apply styles.
             grpcNodes.forEach(id => {
                 graph += `style ${id} fill:#ADD8E6,stroke:#333,color:#000\n`;
             });
             kafkaNodes.forEach(id => {
                 graph += `style ${id} fill:#FFA500,stroke:#333,color:#000\n`;
             });
-
-            const mermaidEl = document.getElementById('mermaid');
-            mermaidEl.innerHTML = '';
-            const { svg } = await mermaid.render('mermaid-svg', graph);
-            mermaidEl.innerHTML = svg;
-            attachNodeEvents();
+            return graph;
         }
 
-        // Attach event listeners to the actual shape (ellipse or rect) inside each grpc node.
-        function attachNodeEvents() {
-            const mermaidEl = document.getElementById('mermaid');
-            const svg = mermaidEl.querySelector('svg');
-            if (!svg) return;
-            // Get all elements whose id starts with "grpc_".
-            const grpcElements = svg.querySelectorAll('[id^="grpc_"]');
-            grpcElements.forEach(node => {
-                // Look for a child <ellipse> or <rect>.
-                let shape = node.querySelector('ellipse');
-                if (!shape) {
-                    shape = node.querySelector('rect');
-                }
-                // Use the shape element if found, otherwise the container.
-                const target = shape ? shape : node;
-                target.addEventListener('mouseover', () => {
-                    // Set the fill attribute directly.
-                    target.setAttribute('fill', '#6495ED'); // darker blue shade
-                    target.style.cursor = 'pointer';
-                });
-                target.addEventListener('mouseout', () => {
-                    target.removeAttribute('fill');
-                });
-                target.addEventListener('click', () => {
-                    // Log to confirm the callback.
-                    console.log('Clicked node: ' + node.getAttribute('id'));
-                    selectService(node.getAttribute('id'));
-                });
+        // Copy the generated Mermaid DSL to the clipboard.
+        function copyMermaidToClipboard() {
+            const dsl = generateMermaidDSL();
+            navigator.clipboard.writeText(dsl).then(function() {
+                alert('Mermaid DSL copied to clipboard!');
+            }, function(err) {
+                console.error('Failed to copy text: ', err);
             });
         }
 
-        // Global callback to load service data into the editor.
-        function selectService(nodeId) {
-            if (nodeId.startsWith("grpc_")) {
-                const serviceName = nodeId.substring("grpc_".length);
-                const cfg = pipelineConfig[serviceName];
-                console.log("Selecting service: " + serviceName, cfg);
-                if (!cfg) return;
-                document.getElementById('service-name').value = serviceName;
-                document.getElementById('kafka-listen').value = (cfg.kafkaListenTopics || []).join(", ");
-                document.getElementById('kafka-publish').value = (cfg.kafkaPublishTopics || []).join(", ");
-                document.getElementById('grpc-forward').value = (cfg.grpcForwardTo || []).join(", ");
-            }
+        // Global function: load service data into the form.
+        function selectService(serviceName) {
+            const cfg = pipelineConfig[serviceName];
+            if (!cfg) return;
+            document.getElementById('service-name').value = serviceName;
+            document.getElementById('kafka-listen').value = (cfg.kafkaListenTopics || []).join(", ");
+            document.getElementById('kafka-publish').value = (cfg.kafkaPublishTopics || []).join(", ");
+            document.getElementById('grpc-forward').value = (cfg.grpcForwardTo || []).join(", ");
         }
-
-        // Expose the callback globally for Mermaid's built-in click directive.
         window.selectService = selectService;
 
-        // Save service configuration and re-render the graph.
+        // Render the Cytoscape graph using a breadthfirst layout.
+        function renderCytoscape() {
+            const elements = [];
+            for (let [service, cfg] of Object.entries(pipelineConfig)) {
+                const grpcNode = nodeId('grpc', service);
+                // Store the original service name in node data.
+                elements.push({ data: { id: grpcNode, label: service, type: 'grpc', original: service } });
+                (cfg.kafkaListenTopics || []).forEach(topic => {
+                    const kafkaNode = nodeId('kafka', topic);
+                    if (!elements.find(e => e.data.id === kafkaNode)) {
+                        elements.push({ data: { id: kafkaNode, label: topic, type: 'kafka' } });
+                    }
+                    elements.push({ data: { id: kafkaNode + '_to_' + grpcNode, source: kafkaNode, target: grpcNode } });
+                });
+                (cfg.kafkaPublishTopics || []).forEach(topic => {
+                    const kafkaNode = nodeId('kafka', topic);
+                    if (!elements.find(e => e.data.id === kafkaNode)) {
+                        elements.push({ data: { id: kafkaNode, label: topic, type: 'kafka' } });
+                    }
+                    elements.push({ data: { id: grpcNode + '_to_' + kafkaNode, source: grpcNode, target: kafkaNode } });
+                });
+                (cfg.grpcForwardTo || []).forEach(target => {
+                    if (target && target.toLowerCase() !== 'null') {
+                        const targetNode = nodeId('grpc', target);
+                        if (!elements.find(e => e.data.id === targetNode)) {
+                            elements.push({ data: { id: targetNode, label: target, type: 'grpc', original: target } });
+                        }
+                        elements.push({ data: { id: grpcNode + '_to_' + targetNode, source: grpcNode, target: targetNode } });
+                    }
+                });
+            }
+
+            let cy = cytoscape({
+                container: document.getElementById('cytoscape'),
+                elements: elements,
+                style: [
+                    {
+                        selector: 'node[type="grpc"]',
+                        style: {
+                            'background-color': '#ADD8E6',
+                            'label': 'data(label)',
+                            'shape': 'ellipse',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': '#000',
+                            'font-size': '12px',
+                            'font-weight': 'normal',
+                            'width': '80px',
+                            'height': '80px',
+                            'text-wrap': 'wrap',
+                            'text-max-width': '70px',
+                            'padding': '5px'
+                        }
+                    },
+                    {
+                        selector: 'node[type="kafka"]',
+                        style: {
+                            'background-color': '#FFA500',
+                            'label': 'data(label)',
+                            'shape': 'rectangle',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': '#000',
+                            'font-size': '12px',
+                            'font-weight': 'normal',
+                            'width': '100px',
+                            'height': '50px',
+                            'text-wrap': 'wrap',
+                            'text-max-width': '90px',
+                            'padding': '5px'
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 2,
+                            'line-color': '#ccc',
+                            'target-arrow-color': '#ccc',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier'
+                        }
+                    }
+                ],
+                layout: {
+                    name: 'breadthfirst',
+                    directed: true,
+                    padding: 50,
+                    spacingFactor: 1.2,
+                    animate: true,
+                    orientation: 'vertical'
+                }
+            });
+
+            // Enable pan/zoom if available.
+            if (typeof cytoscapePanzoom !== 'undefined') {
+                cytoscape.use(cytoscapePanzoom);
+                cy.panzoom();
+            }
+
+            // On tap, load the service data using the stored original name.
+            cy.on('tap', 'node[type="grpc"]', function(evt) {
+                let node = evt.target;
+                let serviceName = node.data('original');
+                if (serviceName) {
+                    selectService(serviceName);
+                }
+            });
+
+            // Fit all nodes in view.
+            cy.fit();
+        }
+
+        // Render the existing services list dynamically.
+        function renderExistingServices() {
+            const listContainer = document.querySelector('.existing-services ul');
+            let html = '';
+            for (let service in pipelineConfig) {
+                html += `<li><a href="#" data-service="${service}" onclick="selectService(this.getAttribute('data-service')); return false;">${service}</a></li>`;
+            }
+            listContainer.innerHTML = html;
+        }
+
+        // Save updated service configuration and re-render the graph and list.
         async function saveService() {
             const payload = {
                 name: document.getElementById('service-name').value,
                 kafkaListenTopics: document.getElementById('kafka-listen').value.split(',').map(s => s.trim()).filter(Boolean),
                 kafkaPublishTopics: document.getElementById('kafka-publish').value.split(',').map(s => s.trim()).filter(Boolean),
-                grpcForwardTo: document.getElementById('grpc-forward').value.split(',').map(s => s.trim()).filter(Boolean),
+                grpcForwardTo: document.getElementById('grpc-forward').value.split(',').map(s => s.trim()).filter(Boolean)
             };
 
             await fetch('/pipeline/add', {
@@ -166,43 +295,55 @@
 
             const response = await fetch('/pipeline');
             pipelineConfig = await response.json();
-            await renderMermaid();
+            renderCytoscape();
+            renderExistingServices();
         }
 
-        document.addEventListener('DOMContentLoaded', renderMermaid);
+        // On page load, render the Cytoscape graph and the existing services list.
+        document.addEventListener('DOMContentLoaded', function(){
+            renderCytoscape();
+            renderExistingServices();
+        });
     </script>
 </head>
 <body>
 <h1>Pipeline Visual Editor</h1>
-<!-- Mermaid diagram container -->
-<div id="mermaid"></div>
+<!-- Cytoscape graph container -->
+<div id="cytoscape"></div>
 
-<h2>Service Editor</h2>
-<form onsubmit="saveService(); return false;">
-    <label>Service Name:<br>
-        <input id="service-name" placeholder="service-name" required/>
-    </label><br>
-    <label>Kafka Listen Topics:<br>
-        <input id="kafka-listen"/>
-    </label><br>
-    <label>Kafka Publish Topics:<br>
-        <input id="kafka-publish"/>
-    </label><br>
-    <label>gRPC Forward To:<br>
-        <input id="grpc-forward"/>
-    </label><br>
-    <button type="submit">Save</button>
-</form>
-
-<h3>Existing Services:</h3>
-<ul>
-    <li th:each="svc : ${pipelineConfig}">
-        <a href="#"
-           th:text="${svc.key}"
-           th:attr="data-service=${svc.key}"
-           onclick="selectService('grpc_' + this.getAttribute('data-service')); return false;">
-        </a>
-    </li>
-</ul>
+<!-- Editor container: service editor form and existing services list side by side -->
+<div class="editor-container">
+    <div class="editor-form">
+        <h2>Service Editor</h2>
+        <form onsubmit="saveService(); return false;">
+            <div class="form-row">
+                <label for="service-name">Service Name:</label>
+                <input id="service-name" placeholder="service-name" required/>
+            </div>
+            <div class="form-row">
+                <label for="kafka-listen">Kafka Listen Topics:</label>
+                <input id="kafka-listen" placeholder="comma separated"/>
+            </div>
+            <div class="form-row">
+                <label for="kafka-publish">Kafka Publish Topics:</label>
+                <input id="kafka-publish" placeholder="comma separated"/>
+            </div>
+            <div class="form-row">
+                <label for="grpc-forward">gRPC Forward To:</label>
+                <input id="grpc-forward" placeholder="comma separated"/>
+            </div>
+            <div class="form-row buttons">
+                <button type="submit">Save</button>
+                <button type="button" onclick="copyMermaidToClipboard()" title="Copy Mermaid to clipboard">Copy Mermaid</button>
+            </div>
+        </form>
+    </div>
+    <div class="existing-services">
+        <h3>Existing Services:</h3>
+        <ul>
+            <!-- This list will be rendered dynamically via JS -->
+        </ul>
+    </div>
+</div>
 </body>
 </html>
