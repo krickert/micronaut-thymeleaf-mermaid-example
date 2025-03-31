@@ -1,6 +1,7 @@
 package com.krickert.search;
 
 import com.krickert.search.pipeline.PipelineConfig;
+import com.krickert.search.pipeline.PipelineConfigService;
 import com.krickert.search.pipeline.ServiceConfiguration;
 import com.krickert.search.pipeline.ServiceConfigurationDto;
 import io.micronaut.http.HttpStatus;
@@ -9,49 +10,48 @@ import io.micronaut.http.annotation.Body;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Get;
 import io.micronaut.http.annotation.Post;
+import io.micronaut.views.View;
 import jakarta.inject.Inject;
 
-import java.util.Collection;
 import java.util.Map;
-
-import io.micronaut.views.View;
 
 @Controller
 public class MermaidController {
 
-    private final PipelineConfig pipelineConfig;
+    private final PipelineConfigService configService;
 
-    public MermaidController(PipelineConfig pipelineConfig) {
-        this.pipelineConfig = pipelineConfig;
+    @Inject
+    public MermaidController(PipelineConfigService configService) {
+        this.configService = configService;
     }
 
     @View("mermaid-editor")
     @Get("/")
     public Map<String, Object> index() {
-        return Map.of("pipelineConfig", pipelineConfig.getService());
+        PipelineConfig activeConfig = configService.getActivePipelineConfig();
+        return Map.of(
+                "pipelineConfig", activeConfig.getService(),
+                "pipelineNames", configService.getAllPipelineNames(),
+                "activePipeline", configService.getActivePipelineConfig().getName()
+        );
     }
 
     @Get(value = "/pipeline", produces = MediaType.APPLICATION_JSON)
     public Map<String, ServiceConfiguration> getPipelineJson() {
-        return pipelineConfig.getService();
+        return configService.getActivePipelineConfig().getService();
     }
 
     @Post(value = "/pipeline/add", consumes = MediaType.APPLICATION_JSON)
     public HttpStatus addService(@Body ServiceConfigurationDto dto) {
-        validateConfig(dto);
-        pipelineConfig.addOrUpdateService(dto);
-        return HttpStatus.CREATED;
-    }
-
-    private void validateConfig(ServiceConfigurationDto dto) {
-        Collection<String> grpcForwards = dto.getGrpcForwardTo();
-        grpcForwards.forEach(grpcForward -> {
-            if (!pipelineConfig.containsService(grpcForward)) {
-                ServiceConfigurationDto serviceDto = new ServiceConfigurationDto();
-                serviceDto.setName(grpcForward);
-                pipelineConfig.addOrUpdateService(serviceDto);
+        // Validate: if any forward-to service isn't present, add it as its own pipeline service.
+        for (String grpcForward : dto.getGrpcForwardTo()) {
+            if (!configService.getActivePipelineConfig().containsService(grpcForward)) {
+                ServiceConfigurationDto newDto = new ServiceConfigurationDto();
+                newDto.setName(grpcForward);
+                configService.getActivePipelineConfig().addOrUpdateService(newDto);
             }
-        });
-        pipelineConfig.addOrUpdateService(dto);
+        }
+        configService.getActivePipelineConfig().addOrUpdateService(dto);
+        return HttpStatus.CREATED;
     }
 }

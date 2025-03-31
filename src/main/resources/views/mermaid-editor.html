@@ -4,20 +4,19 @@
     <meta charset="UTF-8">
     <title>Pipeline Visual Editor</title>
     <style>
+        /* (Inline CSS similar to previous version) */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
         }
         h1, h2, h3 { text-align: center; }
-        /* Cytoscape container takes up full width and 70% of viewport height */
         #cytoscape {
             width: 100%;
             height: 70vh;
             border: 1px solid #ccc;
             box-sizing: border-box;
         }
-        /* Flex container for editor form and existing services */
         .editor-container {
             display: flex;
             justify-content: center;
@@ -25,17 +24,14 @@
             gap: 2rem;
             padding: 1rem;
         }
-        /* Editor form on left */
         .editor-form {
             flex: 1;
             max-width: 400px;
         }
-        /* Existing services list on right */
-        .existing-services {
+        .existing-pipelines {
             flex: 0 0 200px;
             align-self: center;
         }
-        /* Form rows: label and input in one row */
         .form-row {
             display: flex;
             align-items: center;
@@ -52,7 +48,6 @@
             padding: 5px;
             font-size: 14px;
         }
-        /* Buttons row */
         .form-row.buttons {
             justify-content: center;
         }
@@ -74,27 +69,24 @@
             color: #1a73e8;
             text-decoration: none;
         }
-        a:hover {
-            text-decoration: underline;
-        }
+        a:hover { text-decoration: underline; }
     </style>
 
-    <!-- Cytoscape core library -->
+    <!-- Include Cytoscape, panzoom, Mermaid as before -->
     <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
-    <!-- Cytoscape panzoom extension -->
     <script src="https://unpkg.com/cytoscape-panzoom/cytoscape-panzoom.js"></script>
-    <!-- Mermaid for generating DSL (not displayed) -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 
     <script th:inline="javascript">
-        // Inject pipeline configuration JSON from the controller.
+        // Inject the active pipeline configuration and the pipeline names.
         let pipelineConfig = [[${pipelineConfig}]];
+        let pipelineNames = [[${pipelineNames}]];
+        let activePipeline = '[[${activePipeline}]]';
 
-        // Helper: generate a unique node ID by replacing non-word characters.
         const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
 
-        // Generate Mermaid DSL from pipelineConfig.
         function generateMermaidDSL() {
+            // (Same function as before, using pipelineConfig)
             let graph = 'graph TD\n';
             let grpcNodes = new Set();
             let kafkaNodes = new Set();
@@ -135,17 +127,15 @@
             return graph;
         }
 
-        // Copy the generated Mermaid DSL to the clipboard.
         function copyMermaidToClipboard() {
             const dsl = generateMermaidDSL();
-            navigator.clipboard.writeText(dsl).then(function() {
+            navigator.clipboard.writeText(dsl).then(() => {
                 alert('Mermaid DSL copied to clipboard!');
-            }, function(err) {
+            }, err => {
                 console.error('Failed to copy text: ', err);
             });
         }
 
-        // Global function: load service data into the form.
         function selectService(serviceName) {
             const cfg = pipelineConfig[serviceName];
             if (!cfg) return;
@@ -156,12 +146,10 @@
         }
         window.selectService = selectService;
 
-        // Render the Cytoscape graph using a breadthfirst layout.
         function renderCytoscape() {
             const elements = [];
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
                 const grpcNode = nodeId('grpc', service);
-                // Store the original service name in node data.
                 elements.push({ data: { id: grpcNode, label: service, type: 'grpc', original: service } });
                 (cfg.kafkaListenTopics || []).forEach(topic => {
                     const kafkaNode = nodeId('kafka', topic);
@@ -249,13 +237,11 @@
                 }
             });
 
-            // Enable pan/zoom if available.
             if (typeof cytoscapePanzoom !== 'undefined') {
                 cytoscape.use(cytoscapePanzoom);
                 cy.panzoom();
             }
 
-            // On tap, load the service data using the stored original name.
             cy.on('tap', 'node[type="grpc"]', function(evt) {
                 let node = evt.target;
                 let serviceName = node.data('original');
@@ -264,21 +250,28 @@
                 }
             });
 
-            // Fit all nodes in view.
             cy.fit();
         }
 
-        // Render the existing services list dynamically.
-        function renderExistingServices() {
-            const listContainer = document.querySelector('.existing-services ul');
+        function renderExistingPipelines() {
+            const listContainer = document.querySelector('.existing-pipelines ul');
             let html = '';
-            for (let service in pipelineConfig) {
-                html += `<li><a href="#" data-service="${service}" onclick="selectService(this.getAttribute('data-service')); return false;">${service}</a></li>`;
-            }
+            pipelineNames.forEach(name => {
+                // Mark the active pipeline as selected
+                const selected = (name === activePipeline) ? ' (active)' : '';
+                html += `<li><a href="#" data-pipeline="${name}" onclick="selectPipeline(this.getAttribute('data-pipeline')); return false;">${name}${selected}</a></li>`;
+            });
             listContainer.innerHTML = html;
         }
 
-        // Save updated service configuration and re-render the graph and list.
+        // Called when the user selects a different pipeline from the dropdown or list.
+        function selectPipeline(pipelineName) {
+            // For this iteration, you might send a request to update the active pipeline in the backend,
+            // or simply reload the page with a query parameter. For simplicity, we'll use location.href.
+            window.location.href = '/?pipeline=' + pipelineName;
+        }
+
+        // Save updated service configuration and re-render the graph and existing services.
         async function saveService() {
             const payload = {
                 name: document.getElementById('service-name').value,
@@ -296,13 +289,12 @@
             const response = await fetch('/pipeline');
             pipelineConfig = await response.json();
             renderCytoscape();
-            renderExistingServices();
+            renderExistingPipelines();
         }
 
-        // On page load, render the Cytoscape graph and the existing services list.
         document.addEventListener('DOMContentLoaded', function(){
             renderCytoscape();
-            renderExistingServices();
+            renderExistingPipelines();
         });
     </script>
 </head>
@@ -311,7 +303,7 @@
 <!-- Cytoscape graph container -->
 <div id="cytoscape"></div>
 
-<!-- Editor container: service editor form and existing services list side by side -->
+<!-- Editor container: service editor form and existing pipelines list side by side -->
 <div class="editor-container">
     <div class="editor-form">
         <h2>Service Editor</h2>
@@ -338,10 +330,10 @@
             </div>
         </form>
     </div>
-    <div class="existing-services">
-        <h3>Existing Services:</h3>
+    <div class="existing-pipelines">
+        <h3>Pipeline Configurations</h3>
         <ul>
-            <!-- This list will be rendered dynamically via JS -->
+            <!-- Existing pipelines will be rendered here dynamically -->
         </ul>
     </div>
 </div>
