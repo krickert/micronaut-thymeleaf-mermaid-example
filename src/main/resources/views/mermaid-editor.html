@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pipeline Visual Editor</title>
+    <style>
+        /* Inline CSS as a temporary workaround */
+        body {
+            font-family: Arial, sans-serif;
+            padding: 2rem;
+            max-width: 800px;
+            margin: auto;
+            background-color: #f7f9fc;
+        }
+        input {
+            width: 100%;
+            padding: 5px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        a {
+            cursor: pointer;
+            color: #1a73e8;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script th:inline="javascript">
+        mermaid.initialize({ startOnLoad: false });
+
+        // Inject the pipeline configuration JSON from the controller.
+        let pipelineConfig = [[${pipelineConfig}]];
+
+        async function renderMermaid() {
+            let graph = 'graph TD\n';
+            let grpcNodes = new Set();
+            let kafkaNodes = new Set();
+            const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
+
+            // Build nodes and edges from the configuration.
+            for (let [service, cfg] of Object.entries(pipelineConfig)) {
+                const grpcNode = nodeId('grpc', service);
+                if (!grpcNodes.has(grpcNode)) {
+                    // Render the grpc node and add a Mermaid click directive.
+                    graph += `${grpcNode}([${service}])\n`;
+                    graph += `click ${grpcNode} selectService "Edit ${service}"\n`;
+                    grpcNodes.add(grpcNode);
+                }
+                // Kafka listen topics: edge from kafka node to grpc node.
+                (cfg.kafkaListenTopics || []).forEach(topic => {
+                    const kafkaNode = nodeId('kafka', topic);
+                    kafkaNodes.add(kafkaNode);
+                    graph += `${kafkaNode}[${topic}]\n`;
+                    graph += `${kafkaNode} --> ${grpcNode}\n`;
+                });
+                // Kafka publish topics: edge from grpc node to kafka node.
+                (cfg.kafkaPublishTopics || []).forEach(topic => {
+                    const kafkaNode = nodeId('kafka', topic);
+                    kafkaNodes.add(kafkaNode);
+                    graph += `${grpcNode} --> ${kafkaNode}\n`;
+                });
+                // gRPC forward targets: edge from grpc node to target grpc node.
+                (cfg.grpcForwardTo || []).forEach(target => {
+                    if (target && target.toLowerCase() !== 'null') {
+                        const targetNode = nodeId('grpc', target);
+                        if (!grpcNodes.has(targetNode)) {
+                            graph += `${targetNode}([${target}])\n`;
+                            graph += `click ${targetNode} selectService "Edit ${target}"\n`;
+                            grpcNodes.add(targetNode);
+                        }
+                        graph += `${grpcNode} --> ${targetNode}\n`;
+                    }
+                });
+            }
+
+            // Apply styles.
+            grpcNodes.forEach(id => {
+                graph += `style ${id} fill:#ADD8E6,stroke:#333,color:#000\n`;
+            });
+            kafkaNodes.forEach(id => {
+                graph += `style ${id} fill:#FFA500,stroke:#333,color:#000\n`;
+            });
+
+            const mermaidEl = document.getElementById('mermaid');
+            mermaidEl.innerHTML = '';
+            const { svg } = await mermaid.render('mermaid-svg', graph);
+            mermaidEl.innerHTML = svg;
+            attachNodeEvents();
+        }
+
+        // Attach event listeners to the actual shape (ellipse or rect) inside each grpc node.
+        function attachNodeEvents() {
+            const mermaidEl = document.getElementById('mermaid');
+            const svg = mermaidEl.querySelector('svg');
+            if (!svg) return;
+            // Get all elements whose id starts with "grpc_".
+            const grpcElements = svg.querySelectorAll('[id^="grpc_"]');
+            grpcElements.forEach(node => {
+                // Look for a child <ellipse> or <rect>.
+                let shape = node.querySelector('ellipse');
+                if (!shape) {
+                    shape = node.querySelector('rect');
+                }
+                // Use the shape element if found, otherwise the container.
+                const target = shape ? shape : node;
+                target.addEventListener('mouseover', () => {
+                    // Set the fill attribute directly.
+                    target.setAttribute('fill', '#6495ED'); // darker blue shade
+                    target.style.cursor = 'pointer';
+                });
+                target.addEventListener('mouseout', () => {
+                    target.removeAttribute('fill');
+                });
+                target.addEventListener('click', () => {
+                    // Log to confirm the callback.
+                    console.log('Clicked node: ' + node.getAttribute('id'));
+                    selectService(node.getAttribute('id'));
+                });
+            });
+        }
+
+        // Global callback to load service data into the editor.
+        function selectService(nodeId) {
+            if (nodeId.startsWith("grpc_")) {
+                const serviceName = nodeId.substring("grpc_".length);
+                const cfg = pipelineConfig[serviceName];
+                console.log("Selecting service: " + serviceName, cfg);
+                if (!cfg) return;
+                document.getElementById('service-name').value = serviceName;
+                document.getElementById('kafka-listen').value = (cfg.kafkaListenTopics || []).join(", ");
+                document.getElementById('kafka-publish').value = (cfg.kafkaPublishTopics || []).join(", ");
+                document.getElementById('grpc-forward').value = (cfg.grpcForwardTo || []).join(", ");
+            }
+        }
+
+        // Expose the callback globally for Mermaid's built-in click directive.
+        window.selectService = selectService;
+
+        // Save service configuration and re-render the graph.
+        async function saveService() {
+            const payload = {
+                name: document.getElementById('service-name').value,
+                kafkaListenTopics: document.getElementById('kafka-listen').value.split(',').map(s => s.trim()).filter(Boolean),
+                kafkaPublishTopics: document.getElementById('kafka-publish').value.split(',').map(s => s.trim()).filter(Boolean),
+                grpcForwardTo: document.getElementById('grpc-forward').value.split(',').map(s => s.trim()).filter(Boolean),
+            };
+
+            await fetch('/pipeline/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const response = await fetch('/pipeline');
+            pipelineConfig = await response.json();
+            await renderMermaid();
+        }
+
+        document.addEventListener('DOMContentLoaded', renderMermaid);
+    </script>
+</head>
+<body>
+<h1>Pipeline Visual Editor</h1>
+<!-- Mermaid diagram container -->
+<div id="mermaid"></div>
+
+<h2>Service Editor</h2>
+<form onsubmit="saveService(); return false;">
+    <label>Service Name:<br>
+        <input id="service-name" placeholder="service-name" required/>
+    </label><br>
+    <label>Kafka Listen Topics:<br>
+        <input id="kafka-listen"/>
+    </label><br>
+    <label>Kafka Publish Topics:<br>
+        <input id="kafka-publish"/>
+    </label><br>
+    <label>gRPC Forward To:<br>
+        <input id="grpc-forward"/>
+    </label><br>
+    <button type="submit">Save</button>
+</form>
+
+<h3>Existing Services:</h3>
+<ul>
+    <li th:each="svc : ${pipelineConfig}">
+        <a href="#"
+           th:text="${svc.key}"
+           th:attr="data-service=${svc.key}"
+           onclick="selectService('grpc_' + this.getAttribute('data-service')); return false;">
+        </a>
+    </li>
+</ul>
+</body>
+</html>
