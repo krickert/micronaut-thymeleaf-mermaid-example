@@ -1,16 +1,85 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <title>Mermaid Diagram</title>
+    <title>Dynamic Mermaid Diagram</title>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <script>
-        mermaid.initialize({startOnLoad: true});
+        mermaid.initialize({ startOnLoad: false });
+
+        function renderMermaid(pipelineConfig) {
+            let mermaidGraph = 'graph TD\n';
+            let declaredNodes = new Set();
+
+            function nodeId(type, name) {
+                return type + '_' + name.replace(/[^A-Za-z0-9]/g, '_');
+            }
+
+            for (let [serviceName, cfg] of Object.entries(pipelineConfig)) {
+                let serviceNodeId = nodeId('grpc', serviceName);
+                if (!declaredNodes.has(serviceNodeId)) {
+                    mermaidGraph += `  ${serviceNodeId}([${serviceName}])\n`;
+                    declaredNodes.add(serviceNodeId);
+                }
+
+                cfg.kafkaListenTopics && cfg.kafkaListenTopics.forEach(topic => {
+                    let kafkaNodeId = nodeId('kafka', topic);
+                    if (!declaredNodes.has(kafkaNodeId)) {
+                        mermaidGraph += `  ${kafkaNodeId}[${topic}]\n`;
+                        declaredNodes.add(kafkaNodeId);
+                    }
+                    mermaidGraph += `  ${kafkaNodeId} --> ${serviceNodeId}\n`;
+                });
+
+                cfg.kafkaPublishTopics && cfg.kafkaPublishTopics.forEach(topic => {
+                    let kafkaNodeId = nodeId('kafka', topic);
+                    if (!declaredNodes.has(kafkaNodeId)) {
+                        mermaidGraph += `  ${kafkaNodeId}[${topic}]\n`;
+                        declaredNodes.add(kafkaNodeId);
+                    }
+                    mermaidGraph += `  ${serviceNodeId} --> ${kafkaNodeId}\n`;
+                });
+
+                cfg.grpcForwardTo && cfg.grpcForwardTo.forEach(grpcService => {
+                    if (grpcService && grpcService.toLowerCase() !== 'null') {
+                        let grpcTargetNodeId = nodeId('grpc', grpcService);
+                        if (!declaredNodes.has(grpcTargetNodeId)) {
+                            mermaidGraph += `  ${grpcTargetNodeId}([${grpcService}])\n`;
+                            declaredNodes.add(grpcTargetNodeId);
+                        }
+                        mermaidGraph += `  ${serviceNodeId} --> ${grpcTargetNodeId}\n`;
+                    }
+                });
+            }
+
+            declaredNodes.forEach(id => {
+                if (id.startsWith('kafka_')) {
+                    mermaidGraph += `  style ${id} fill:#FFA500,stroke:#333,color:#000\n`;
+                }
+                if (id.startsWith('grpc_')) {
+                    mermaidGraph += `  style ${id} fill:#ADD8E6,stroke:#333,color:#000\n`;
+                }
+            });
+
+            document.querySelector('.mermaid').textContent = mermaidGraph;
+            mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            fetch('/pipeline')
+                .then(response => response.json())
+                .then(data => renderMermaid(data))
+                .catch(err => {
+                    console.error("Failed fetching pipelineConfig:", err);
+                    document.querySelector('.mermaid').textContent = "Failed loading diagram";
+                });
+        });
+
     </script>
 </head>
+
 <body>
-<div class="mermaid" th:text="${mermaidGraph}">
-    Loading Mermaid Graph...
-</div>
+<div class="mermaid">Loading diagram...</div>
 </body>
 </html>
