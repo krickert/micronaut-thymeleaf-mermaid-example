@@ -11,6 +11,7 @@ import io.micronaut.http.annotation.Get;
 import io.micronaut.http.annotation.Post;
 import jakarta.inject.Inject;
 
+import java.util.Collection;
 import java.util.Map;
 
 import io.micronaut.views.View;
@@ -37,7 +38,20 @@ public class MermaidController {
 
     @Post(value = "/pipeline/add", consumes = MediaType.APPLICATION_JSON)
     public HttpStatus addService(@Body ServiceConfigurationDto dto) {
+        validateConfig(dto);
         pipelineConfig.addOrUpdateService(dto);
         return HttpStatus.CREATED;
+    }
+
+    private void validateConfig(ServiceConfigurationDto dto) {
+        Collection<String> grpcForwards = dto.getGrpcForwardTo();
+        grpcForwards.forEach(grpcForward -> {
+            if (!pipelineConfig.containsService(grpcForward)) {
+                ServiceConfigurationDto serviceDto = new ServiceConfigurationDto();
+                serviceDto.setName(grpcForward);
+                pipelineConfig.addOrUpdateService(serviceDto);
+            }
+        });
+        pipelineConfig.addOrUpdateService(dto);
     }
 }

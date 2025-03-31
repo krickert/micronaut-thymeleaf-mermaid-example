@@ -25,6 +25,10 @@ public class PipelineConfig {
         this.service = new ConcurrentHashMap<>(service);
     }
 
+    public boolean containsService(String serviceName) {
+        return service.containsKey(serviceName);
+    }
+
     public void addOrUpdateService(ServiceConfigurationDto dto) {
         ServiceConfiguration config = new ServiceConfiguration(dto.getName());
         config.setKafkaListenTopics(dto.getKafkaListenTopics());
