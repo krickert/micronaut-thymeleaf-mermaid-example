@@ -46,4 +46,16 @@ public class PipelineConfigService {
             this.activePipelineName = activePipelineName;
         }
     }
+
+    public void deleteService(String serviceName) {
+        PipelineConfig activeConfig = getActivePipelineConfig();
+        // Remove references from all services' grpcForwardTo lists.
+        activeConfig.getService().values().forEach(service -> {
+            if (service.getGrpcForwardTo() != null) {
+                service.getGrpcForwardTo().removeIf(target -> target.equalsIgnoreCase(serviceName));
+            }
+        });
+        // Remove the service itself from the active configuration.
+        activeConfig.getService().remove(serviceName);
+    }
 }

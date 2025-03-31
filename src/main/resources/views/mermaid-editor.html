@@ -4,109 +4,103 @@
     <meta charset="UTF-8">
     <title>Pipeline Visual Editor</title>
     <style>
+        /* Global styles */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
         }
-        h1, h2, h3 { text-align: center; }
-        /* Cytoscape container takes up full width and 70% of viewport height */
+        h1, h2 { text-align: center; }
+
+        /* Cytoscape graph container */
         #cytoscape {
             width: 100%;
             height: 70vh;
             border: 1px solid #ccc;
             box-sizing: border-box;
         }
-        /* Flex container for editor form and pipeline list */
-        .editor-container {
-            display: flex;
+
+        /* "New Service" button */
+        .new-service-btn {
+            display: block;
+            margin: 1rem auto;
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .new-service-btn:hover {
+            background-color: #45a049;
+        }
+
+        /* Modal overlay and card */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
             justify-content: center;
-            align-items: flex-start;
-            gap: 2rem;
-            padding: 1rem;
+            align-items: center;
+            z-index: 1000;
         }
-        .editor-form {
-            flex: 1;
-            max-width: 400px;
+        .modal-card {
+            background: #fff;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            width: 400px;
+            max-width: 90%;
         }
-        .existing-pipelines {
-            flex: 0 0 300px;
-            align-self: flex-start;
+        .modal-card h2 {
+            margin-top: 0;
+            text-align: center;
         }
-        /* Tighter form rows: label and input on the same line */
-        .form-row {
+        .modal-card .form-row {
             display: flex;
             align-items: center;
             margin: 0.5rem 0;
         }
-        .form-row label {
-            width: 150px;
+        .modal-card .form-row label {
+            width: 130px;
             margin-right: 0.5rem;
             text-align: right;
-            font-weight: normal;
         }
-        .form-row input {
+        .modal-card .form-row input {
             flex: 1;
             padding: 5px;
             font-size: 14px;
         }
-        .form-row.buttons {
-            justify-content: center;
+        .modal-card .form-buttons {
+            text-align: center;
+            margin-top: 1rem;
         }
-        .form-row.buttons button {
+        .modal-card .form-buttons button {
             margin: 0 0.5rem;
             padding: 8px 16px;
             font-size: 14px;
         }
-        /* Pipeline list styles */
-        .pipeline-list {
-            border: 1px solid #ccc;
-            padding: 10px;
-        }
-        .pipeline-list h3 {
-            margin-top: 0;
-        }
-        .pipeline-list ul {
-            list-style: none;
-            padding: 0;
-        }
-        .pipeline-list li {
-            margin-bottom: 10px;
-        }
-        .pipeline-list a {
-            cursor: pointer;
-            color: #1a73e8;
-            text-decoration: none;
-        }
-        .pipeline-list a:hover {
-            text-decoration: underline;
-        }
-        .services-list {
-            margin-left: 10px;
-            font-size: 90%;
-            color: #555;
-        }
     </style>
 
-    <!-- Include Cytoscape, panzoom, and Mermaid -->
+    <!-- Include Cytoscape, panzoom, and Mermaid libraries -->
     <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-panzoom/cytoscape-panzoom.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 
     <script th:inline="javascript">
         /*
-           The controller now supplies:
-             - pipelineConfig: the active pipeline’s service map.
-             - pipelineNames: a set of pipeline names.
-             - activePipeline: the name of the active pipeline.
-             - pipelines: a map from pipeline name to its full service map.
+           The controller supplies:
+             - pipelineConfig: active pipeline’s service map.
+             - pipelineNames, activePipeline, and pipelines (allPipelines) are no longer needed on the FE.
         */
         let pipelineConfig = [[${pipelineConfig}]];
-        let pipelineNames = [[${pipelineNames}]];
-        let activePipeline = '[[${activePipeline}]]';
-        let allPipelines = [[${pipelines}]];
 
-        // Helper function: generate a unique node ID by replacing non-word characters.
+        // Helper: generate unique node IDs.
         const nodeId = (type, name) => type + '_' + name.replace(/\W/g, '_');
 
         // Generate Mermaid DSL from the active pipeline configuration.
@@ -115,31 +109,34 @@
             let grpcNodes = new Set();
             let kafkaNodes = new Set();
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
+                // Ignore empty or "null" service names.
+                if (!service || service.trim() === "" || service.trim().toLowerCase() === "null") continue;
                 const grpcNode = nodeId('grpc', service);
                 if (!grpcNodes.has(grpcNode)) {
                     graph += `${grpcNode}([${service}])\n`;
                     grpcNodes.add(grpcNode);
                 }
                 (cfg.kafkaListenTopics || []).forEach(topic => {
+                    if (!topic || topic.trim() === "" || topic.trim().toLowerCase() === "null") return;
                     const kafkaNode = nodeId('kafka', topic);
                     kafkaNodes.add(kafkaNode);
                     graph += `${kafkaNode}[${topic}]\n`;
                     graph += `${kafkaNode} --> ${grpcNode}\n`;
                 });
                 (cfg.kafkaPublishTopics || []).forEach(topic => {
+                    if (!topic || topic.trim() === "" || topic.trim().toLowerCase() === "null") return;
                     const kafkaNode = nodeId('kafka', topic);
                     kafkaNodes.add(kafkaNode);
                     graph += `${grpcNode} --> ${kafkaNode}\n`;
                 });
                 (cfg.grpcForwardTo || []).forEach(target => {
-                    if (target && target.toLowerCase() !== 'null') {
-                        const targetNode = nodeId('grpc', target);
-                        if (!grpcNodes.has(targetNode)) {
-                            graph += `${targetNode}([${target}])\n`;
-                            grpcNodes.add(targetNode);
-                        }
-                        graph += `${grpcNode} --> ${targetNode}\n`;
+                    if (!target || target.trim() === "" || target.trim().toLowerCase() === "null") return;
+                    const targetNode = nodeId('grpc', target);
+                    if (!grpcNodes.has(targetNode)) {
+                        graph += `${targetNode}([${target}])\n`;
+                        grpcNodes.add(targetNode);
                     }
+                    graph += `${grpcNode} --> ${targetNode}\n`;
                 });
             }
             grpcNodes.forEach(id => {
@@ -160,14 +157,42 @@
             });
         }
 
-        // Global function: load service data from active pipeline config into the form.
+        // Open the modal for editing/adding a service.
+        function openServiceModal(serviceName) {
+            // Ignore if serviceName is empty or "null".
+            if (serviceName && (serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null")) return;
+            const modal = document.getElementById('service-modal');
+            if (serviceName) {
+                const cfg = pipelineConfig[serviceName];
+                document.getElementById('modal-service-name').value = serviceName;
+                document.getElementById('modal-kafka-listen').value = (cfg.kafkaListenTopics || []).join(", ");
+                document.getElementById('modal-kafka-publish').value = (cfg.kafkaPublishTopics || []).join(", ");
+                document.getElementById('modal-grpc-forward').value = (cfg.grpcForwardTo || []).join(", ");
+            } else {
+                document.getElementById('modal-service-name').value = "";
+                document.getElementById('modal-kafka-listen').value = "";
+                document.getElementById('modal-kafka-publish').value = "";
+                document.getElementById('modal-grpc-forward').value = "";
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeServiceModal() {
+            document.getElementById('service-modal').style.display = 'none';
+        }
+
+        // Close modal on ESC key.
+        document.addEventListener('keydown', function(e) {
+            const modal = document.getElementById('service-modal');
+            if (modal.style.display === 'flex' && e.key === "Escape") {
+                closeServiceModal();
+            }
+        });
+
+        // When a node or an existing service is clicked, open the modal.
         function selectService(serviceName) {
-            const cfg = pipelineConfig[serviceName];
-            if (!cfg) return;
-            document.getElementById('service-name').value = serviceName;
-            document.getElementById('kafka-listen').value = (cfg.kafkaListenTopics || []).join(", ");
-            document.getElementById('kafka-publish').value = (cfg.kafkaPublishTopics || []).join(", ");
-            document.getElementById('grpc-forward').value = (cfg.grpcForwardTo || []).join(", ");
+            if (!serviceName || serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null") return;
+            openServiceModal(serviceName);
         }
         window.selectService = selectService;
 
@@ -175,9 +200,12 @@
         function renderCytoscape() {
             const elements = [];
             for (let [service, cfg] of Object.entries(pipelineConfig)) {
+                // Skip empty or "null" service names.
+                if (!service || service.trim() === "" || service.trim().toLowerCase() === "null") continue;
                 const grpcNode = nodeId('grpc', service);
                 elements.push({ data: { id: grpcNode, label: service, type: 'grpc', original: service } });
                 (cfg.kafkaListenTopics || []).forEach(topic => {
+                    if (!topic || topic.trim() === "" || topic.trim().toLowerCase() === "null") return;
                     const kafkaNode = nodeId('kafka', topic);
                     if (!elements.find(e => e.data.id === kafkaNode)) {
                         elements.push({ data: { id: kafkaNode, label: topic, type: 'kafka' } });
@@ -185,6 +213,7 @@
                     elements.push({ data: { id: kafkaNode + '_to_' + grpcNode, source: kafkaNode, target: grpcNode } });
                 });
                 (cfg.kafkaPublishTopics || []).forEach(topic => {
+                    if (!topic || topic.trim() === "" || topic.trim().toLowerCase() === "null") return;
                     const kafkaNode = nodeId('kafka', topic);
                     if (!elements.find(e => e.data.id === kafkaNode)) {
                         elements.push({ data: { id: kafkaNode, label: topic, type: 'kafka' } });
@@ -192,13 +221,12 @@
                     elements.push({ data: { id: grpcNode + '_to_' + kafkaNode, source: grpcNode, target: kafkaNode } });
                 });
                 (cfg.grpcForwardTo || []).forEach(target => {
-                    if (target && target.toLowerCase() !== 'null') {
-                        const targetNode = nodeId('grpc', target);
-                        if (!elements.find(e => e.data.id === targetNode)) {
-                            elements.push({ data: { id: targetNode, label: target, type: 'grpc', original: target } });
-                        }
-                        elements.push({ data: { id: grpcNode + '_to_' + targetNode, source: grpcNode, target: targetNode } });
+                    if (!target || target.trim() === "" || target.trim().toLowerCase() === "null") return;
+                    const targetNode = nodeId('grpc', target);
+                    if (!elements.find(e => e.data.id === targetNode)) {
+                        elements.push({ data: { id: targetNode, label: target, type: 'grpc', original: target } });
                     }
+                    elements.push({ data: { id: grpcNode + '_to_' + targetNode, source: grpcNode, target: targetNode } });
                 });
             }
 
@@ -216,7 +244,6 @@
                             'text-halign': 'center',
                             'color': '#000',
                             'font-size': '12px',
-                            'font-weight': 'normal',
                             'width': '80px',
                             'height': '80px',
                             'text-wrap': 'wrap',
@@ -234,7 +261,6 @@
                             'text-halign': 'center',
                             'color': '#000',
                             'font-size': '12px',
-                            'font-weight': 'normal',
                             'width': '100px',
                             'height': '50px',
                             'text-wrap': 'wrap',
@@ -263,11 +289,21 @@
                 }
             });
 
+            // Enable pan/zoom if available.
             if (typeof cytoscapePanzoom !== 'undefined') {
                 cytoscape.use(cytoscapePanzoom);
                 cy.panzoom();
             }
 
+            // Change node color on mouseover and revert on mouseout.
+            cy.on('mouseover', 'node[type="grpc"]', function(evt) {
+                evt.target.css('background-color', '#6495ED'); // darker blue
+            });
+            cy.on('mouseout', 'node[type="grpc"]', function(evt) {
+                evt.target.css('background-color', '#ADD8E6');
+            });
+
+            // On tap, load the service data using the stored original name.
             cy.on('tap', 'node[type="grpc"]', function(evt) {
                 let node = evt.target;
                 let serviceName = node.data('original');
@@ -279,46 +315,47 @@
             cy.fit();
         }
 
-        function renderExistingPipelines() {
-            const listContainer = document.querySelector('.existing-pipelines ul');
-            let html = '';
-            Object.values(pipelineNames).forEach(name => {
-                const selected = (name === activePipeline) ? ' (active)' : '';
-                html += `<li><a href="#" data-pipeline="${name}" onclick="selectPipeline(this.getAttribute('data-pipeline')); return false;">${name}${selected}</a></li>`;
+        // Delete service configuration: send delete request to backend.
+        async function deleteModalService() {
+            const serviceName = document.getElementById('modal-service-name').value;
+            if (!serviceName || serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null") return;
+            await fetch('/pipeline/delete', {
+                method: 'POST', // or DELETE if supported
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: serviceName })
             });
-            listContainer.innerHTML = html;
+            const response = await fetch('/pipeline');
+            pipelineConfig = await response.json();
+            renderCytoscape();
+            closeServiceModal();
         }
 
-        // Called when the user selects a different pipeline.
-        function selectPipeline(pipelineName) {
-            // For now, simply reload the page with the selected pipeline.
-            window.location.href = '/?pipeline=' + pipelineName;
-        }
-
-        // Save the updated service configuration and re-render the graph and pipeline list.
-        async function saveService() {
+        // Save service configuration from the modal and re-render.
+        async function saveModalService() {
+            const serviceName = document.getElementById('modal-service-name').value;
+            if (!serviceName || serviceName.trim() === "" || serviceName.trim().toLowerCase() === "null") {
+                alert("Invalid service name.");
+                return;
+            }
             const payload = {
-                name: document.getElementById('service-name').value,
-                kafkaListenTopics: document.getElementById('kafka-listen').value.split(',').map(s => s.trim()).filter(Boolean),
-                kafkaPublishTopics: document.getElementById('kafka-publish').value.split(',').map(s => s.trim()).filter(Boolean),
-                grpcForwardTo: document.getElementById('grpc-forward').value.split(',').map(s => s.trim()).filter(Boolean)
+                name: serviceName,
+                kafkaListenTopics: document.getElementById('modal-kafka-listen').value.split(',').map(s => s.trim()).filter(Boolean),
+                kafkaPublishTopics: document.getElementById('modal-kafka-publish').value.split(',').map(s => s.trim()).filter(Boolean),
+                grpcForwardTo: document.getElementById('modal-grpc-forward').value.split(',').map(s => s.trim()).filter(Boolean)
             };
-
             await fetch('/pipeline/add', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-
             const response = await fetch('/pipeline');
             pipelineConfig = await response.json();
             renderCytoscape();
-            renderExistingPipelines();
+            closeServiceModal();
         }
 
         document.addEventListener('DOMContentLoaded', function(){
             renderCytoscape();
-            renderExistingPipelines();
         });
     </script>
 </head>
@@ -327,38 +364,34 @@
 <!-- Cytoscape graph container -->
 <div id="cytoscape"></div>
 
-<!-- Editor container: service editor form and pipeline list side by side -->
-<div class="editor-container">
-    <div class="editor-form">
+<!-- "New Service" button -->
+<button class="new-service-btn" onclick="openServiceModal()">New Service</button>
+
+<!-- Modal for editing/adding a service -->
+<div id="service-modal" class="modal-overlay">
+    <div class="modal-card">
         <h2>Service Editor</h2>
-        <form onsubmit="saveService(); return false;">
-            <div class="form-row">
-                <label for="service-name">Service Name:</label>
-                <input id="service-name" placeholder="service-name" required/>
-            </div>
-            <div class="form-row">
-                <label for="kafka-listen">Kafka Listen Topics:</label>
-                <input id="kafka-listen" placeholder="comma separated"/>
-            </div>
-            <div class="form-row">
-                <label for="kafka-publish">Kafka Publish Topics:</label>
-                <input id="kafka-publish" placeholder="comma separated"/>
-            </div>
-            <div class="form-row">
-                <label for="grpc-forward">gRPC Forward To:</label>
-                <input id="grpc-forward" placeholder="comma separated"/>
-            </div>
-            <div class="form-row buttons">
-                <button type="submit">Save</button>
-                <button type="button" onclick="copyMermaidToClipboard()" title="Copy Mermaid to clipboard">Copy Mermaid</button>
-            </div>
-        </form>
-    </div>
-    <div class="existing-pipelines">
-        <h3>Pipeline Configurations</h3>
-        <ul>
-            <!-- This list will be rendered dynamically with pipeline names and their services -->
-        </ul>
+        <div class="form-row">
+            <label for="modal-service-name">Service Name:</label>
+            <input id="modal-service-name" placeholder="service-name" required/>
+        </div>
+        <div class="form-row">
+            <label for="modal-kafka-listen">Kafka Listen:</label>
+            <input id="modal-kafka-listen" placeholder="comma separated"/>
+        </div>
+        <div class="form-row">
+            <label for="modal-kafka-publish">Kafka Publish:</label>
+            <input id="modal-kafka-publish" placeholder="comma separated"/>
+        </div>
+        <div class="form-row">
+            <label for="modal-grpc-forward">gRPC Forward:</label>
+            <input id="modal-grpc-forward" placeholder="comma separated"/>
+        </div>
+        <div class="form-buttons">
+            <button onclick="saveModalService()">Save</button>
+            <button onclick="deleteModalService()">Delete</button>
+            <button onclick="closeServiceModal()">Cancel</button>
+        </div>
     </div>
 </div>
 </body>

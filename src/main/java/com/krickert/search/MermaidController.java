@@ -4,6 +4,7 @@ import com.krickert.search.pipeline.PipelineConfig;
 import com.krickert.search.pipeline.PipelineConfigService;
 import com.krickert.search.pipeline.ServiceConfiguration;
 import com.krickert.search.pipeline.ServiceConfigurationDto;
+import io.micronaut.core.util.StringUtils;
 import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
 import io.micronaut.http.annotation.Body;
@@ -47,14 +48,23 @@ public class MermaidController {
         return configService.getActivePipelineConfig().getService();
     }
 
+    @Post(value = "/pipeline/delete", consumes = MediaType.APPLICATION_JSON)
+    public HttpStatus deleteService(@Body ServiceConfigurationDto dto) {
+        // Assume dto.getName() holds the service name to delete.
+        configService.deleteService(dto.getName());
+        return HttpStatus.OK;
+    }
+
     @Post(value = "/pipeline/add", consumes = MediaType.APPLICATION_JSON)
     public HttpStatus addService(@Body ServiceConfigurationDto dto) {
         // Validate: if any forward-to service isn't present in the active pipeline, add it.
         for (String grpcForward : dto.getGrpcForwardTo()) {
             if (!configService.getActivePipelineConfig().containsService(grpcForward)) {
-                ServiceConfigurationDto newDto = new ServiceConfigurationDto();
-                newDto.setName(grpcForward);
-                configService.getActivePipelineConfig().addOrUpdateService(newDto);
+                if (!"null".equals(grpcForward) && StringUtils.isNotEmpty(grpcForward)) {
+                    ServiceConfigurationDto newDto = new ServiceConfigurationDto();
+                    newDto.setName(grpcForward);
+                    configService.getActivePipelineConfig().addOrUpdateService(newDto);
+                }
             }
         }
         configService.getActivePipelineConfig().addOrUpdateService(dto);
